@@ -57,7 +57,6 @@ const MapView = () => {
             restaurants.map(rest => {
                 const point = turf.point(rest.position);
                 const distance = clientPosition ? turf.distance(turf.point(clientPosition), point, { units: 'kilometers' }) : Infinity;
-                console.log((distance / 30).toFixed(2));
                 point.properties = {
                     name: rest.name,
                     address: rest.address,
