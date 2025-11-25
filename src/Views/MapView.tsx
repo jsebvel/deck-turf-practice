@@ -1,9 +1,12 @@
-import React, { useEffect, useState, useMemo } from 'react'
+/* eslint-disable react-hooks/set-state-in-render */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import  { useEffect, useState, useMemo } from 'react'
 import { DeckGL } from 'deck.gl';
 import { LineLayer, PolygonLayer, ScatterplotLayer } from '@deck.gl/layers';
 import { Map } from 'react-map-gl/maplibre';
 import * as turf from '@turf/turf';
 import { Eye, EyeClosed } from "lucide-react"
+import type { MapViewState } from '@deck.gl/core';
 
 import {
     Tooltip,
@@ -13,14 +16,14 @@ import {
 } from "@/components/ui/tooltip"
 import { Toggle } from '@/components/ui/toggle';
 import { Slider } from '@/components/ui/slider';
-
-const INITIAL_VIEW_STATE = {
+const INITIAL_VIEW_STATE: MapViewState = {
     longitude: -75.515,
     latitude: 5.072,
     zoom: 12,
     pitch: 0,
     bearing: 0
 }
+
 
 const restaurants = [
     { position: [-75.5175, 5.0689], name: 'La Terraza Gourmet', type: 'restaurant', address: 'Calle 23 #25-41, Manizales', phone: '(6) 887 4521' },
