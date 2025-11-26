@@ -11,7 +11,9 @@ import {
   buffer,
   booleanPointInPolygon,
   lineString,
-  length
+  length,
+  nearestPoint,
+  convex,
 } from "@turf/turf";
 import { Eye, EyeClosed } from "lucide-react";
 import type { MapViewState } from "@deck.gl/core";
@@ -121,52 +123,65 @@ const MapView = () => {
     null
   );
   const [showBuffers, setShowBuffers] = useState<boolean>(true);
-  const [restaurantRadius, setRestaurantRadius] = useState<number>(0.5);
+  const [restaurantRadius, setRestaurantRadius] = useState<number>(0.1);
 
-  const { buffers, boundingBox, perimeter } = useMemo(() => {
-    const allRestaurantsPoint = featureCollection(
-      restaurants.map((rest) => {
-        const pointValue = point(rest.position);
-        const distanceValue = clientPosition
-          ? distance(point(clientPosition), pointValue, {
-              units: "kilometers",
-            })
-          : Infinity;
-        pointValue.properties = {
-          name: rest.name,
-          address: rest.address,
-          phone: rest.phone,
-          distance: distanceValue,
-          time: `${((distanceValue / 30) * 60).toFixed(2)} minutes`,
-        };
-        return pointValue;
-      })
-    );
-    const bboxValue = bbox(allRestaurantsPoint);
-    const polygon = bboxPolygon(bboxValue);
-    const perimeterValue = 
-      length(polygon, { units: "kilometers" })
-      .toFixed(2);
-    const buffersArray = allRestaurantsPoint.features.map((feature) => {
-      const bufferValue = buffer(feature, restaurantRadius, {
-        units: "kilometers",
+  const { buffers, boundingBox, perimeter, nearestRestaurantLine, convexHull } =
+    useMemo(() => {
+      const allRestaurantsPoint = featureCollection(
+        restaurants.map((rest) => {
+          const pointValue = point(rest.position);
+          const distanceValue = clientPosition
+            ? distance(point(clientPosition), pointValue, {
+                units: "kilometers",
+              })
+            : Infinity;
+          pointValue.properties = {
+            name: rest.name,
+            address: rest.address,
+            phone: rest.phone,
+            distance: distanceValue,
+            time: `${((distanceValue / 30) * 60).toFixed(2)} minutes`,
+          };
+          return pointValue;
+        })
+      );
+      const bboxValue = bbox(allRestaurantsPoint);
+      const polygon = bboxPolygon(bboxValue);
+      const perimeterValue = length(polygon, { units: "kilometers" }).toFixed(
+        2
+      );
+      const buffersArray = allRestaurantsPoint.features.map((feature) => {
+        const bufferValue = buffer(feature, restaurantRadius, {
+          units: "kilometers",
+        });
+        if (bufferValue) {
+          bufferValue.properties = {
+            ...feature.properties,
+            position: feature.geometry.coordinates,
+          };
+        }
+        return bufferValue;
       });
-      if (bufferValue) {
-        bufferValue.properties = {
-          ...feature.properties,
-          position: feature.geometry.coordinates,
-        };
-      }
-      return bufferValue;
-    });
-    return {
-      buffers: buffersArray,
-      boundingBox: polygon,
-      perimeter: perimeterValue,
-    };
-  }, [clientPosition, restaurantRadius]);
+      const nearestLine = clientPosition
+        ? nearestPoint(point(clientPosition), allRestaurantsPoint)
+        : null;
+      const tempConvex = convex(allRestaurantsPoint);
 
-  const { availableRestaurants, nearestRestaurantLine } = useMemo(() => {
+      console.log("CONVEX HULL", tempConvex);
+      console.log("NEAR", nearestLine);
+      return {
+        buffers: buffersArray,
+        boundingBox: polygon,
+        perimeter: perimeterValue,
+        restaurantPoint: allRestaurantsPoint,
+        nearestRestaurantLine: nearestLine
+          ? lineString([clientPosition!, nearestLine.geometry.coordinates])
+          : null,
+        convexHull: tempConvex,
+      };
+    }, [clientPosition, restaurantRadius]);
+
+  const { availableRestaurants, nearestConvexRestaurant } = useMemo(() => {
     const restaurantsInRange = buffers?.filter((rest) => {
       if (!clientPosition || !rest) return false;
       return booleanPointInPolygon(clientPosition, rest);
@@ -174,17 +189,20 @@ const MapView = () => {
     const sortedRestaurants = restaurantsInRange.sort((a, b) => {
       return a.properties.distance - b.properties.distance;
     });
-    const nearestLine =
-      sortedRestaurants.length > 0
-        ? lineString([
-            sortedRestaurants[0].properties.position,
-            clientPosition!,
-          ])
-        : null;
-
+    const nearestConvex =
+      sortedRestaurants.length === 0
+        ? null
+        : convex(
+            featureCollection(
+              sortedRestaurants.length > 2
+                ? sortedRestaurants.slice(0, sortedRestaurants.length - 2)
+                : sortedRestaurants
+            )
+          );
+    console.log("Nearest convex", nearestConvex);
     return {
       availableRestaurants: sortedRestaurants,
-      nearestRestaurantLine: nearestLine,
+      nearestConvexRestaurant: nearestConvex,
     };
   }, [buffers, clientPosition]);
 
@@ -265,6 +283,26 @@ const MapView = () => {
       getColor: [255, 0, 0],
       getWidth: 4,
     }),
+    new PolygonLayer({
+      visible: showBuffers,
+      id: "convex-hull",
+      data: convexHull ? [convexHull] : [],
+      getPolygon: (d) => d.geometry.coordinates,
+      getFillColor: [255, 255, 0, 50],
+      getLineColor: [255, 255, 0, 200],
+      getLineWidth: 2,
+      lineWidthMinPixels: 1,
+    }),
+    new PolygonLayer({
+      visible: showBuffers,
+      id: "convex-hull-nearest",
+      data: [nearestConvexRestaurant],
+      getPolygon: (d) => d.geometry.coordinates,
+      getFillColor: [255, 255, 0, 50],
+      getLineColor: [255, 255, 255, 200],
+      getLineWidth: 2,
+      lineWidthMinPixels: 1,
+    }),
   ];
   return (
     <TooltipProvider>
@@ -281,13 +319,13 @@ const MapView = () => {
         >
           <Map mapStyle="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json" />
         </DeckGL>
-        <div className="absolute ml-4 items-start text-justify ">
+        <div className="absolute ml-4 top-4 items-start text-justify  bg-gray-500/5 p-4 rounded-2xl">
           <p className="text-xl text-white">Menu</p>
           <p className=" text-white">Total perimeter: {perimeter}km </p>
           <Toggle
             pressed={showBuffers}
             onPressedChange={setShowBuffers}
-            className="data-[state=on]:bg-white data-[state=on]:hover:bg-white"
+            className="mt-4 data-[state=on]:bg-white data-[state=on]:hover:bg-white"
           >
             {showBuffers ? (
               <Eye className="mr-2 text-white" />
@@ -298,11 +336,13 @@ const MapView = () => {
 
           <Slider
             className="mt-4 border rounded-2xl"
-            defaultValue={[0.2]}
+            //defaultValue={[restaurantRadius]}
             max={0.5}
             step={0.1}
+            value={[restaurantRadius]}
             onValueChange={(value) => setRestaurantRadius(value[0])}
           />
+          <div className="mt-4 text-yellow-400">Convex hull: -----</div>
         </div>
         {restaurantInfo && (
           <Tooltip open={true}>
