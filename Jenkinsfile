@@ -27,6 +27,9 @@ pipeline {
             when {
                 expression { return currentBuild.result == 'SUCCESS'}
             }
+            steps {
+                echo "Deploying the project: ${env.PROJECT_NAME}"
+            }
         }
     }
     post {
